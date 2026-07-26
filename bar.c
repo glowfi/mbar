@@ -41,6 +41,25 @@ static const char *fontpaths[] = {
 	"/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
 };
 
+/* ----------------------------- command block ---------------------------- */
+struct cmdcache { char out[128]; int tick; };
+
+/* run cmd every `secs` seconds, serve cached output in between */
+static void blk_cmd(const char *cmd, int secs, struct cmdcache *c,
+                    char *o, size_t n) {
+	if (c->tick-- <= 0) {
+		c->tick = secs - 1;
+		FILE *p = popen(cmd, "r");
+		c->out[0] = '\0';
+		if (p) {
+			if (fgets(c->out, sizeof c->out, p))
+				c->out[strcspn(c->out, "\n")] = '\0';
+			pclose(p);
+		}
+	}
+	snprintf(o, n, "%s", c->out);
+}
+
 static void blk_date(char *o, size_t n) {
 	time_t t = time(NULL);
 	strftime(o, n, "%a %d %b %Y", localtime(&t));
@@ -48,6 +67,10 @@ static void blk_date(char *o, size_t n) {
 static void blk_time(char *o, size_t n) {
 	time_t t = time(NULL);
 	strftime(o, n, "%H:%M:%S", localtime(&t));
+}
+static void blk_weather(char *o, size_t n) {
+	static struct cmdcache c;
+	blk_cmd("~/.scripts/weather.sh", 600, &c, o, n);   /* every 10min */
 }
 /* right side, dwmblocks style: add a function above, list it here. */
 static void (*blocks[])(char *, size_t) = { blk_date, blk_time };
