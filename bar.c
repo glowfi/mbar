@@ -18,18 +18,24 @@
 #include "ext-workspace-v1-client-protocol.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 
+/* parse "#RRGGBB" or "#AARRGGBB" -> 0xAARRGGBB */
+static uint32_t hex(const char *s) {
+	uint32_t v = (uint32_t)strtoul(s + 1, NULL, 16);
+	return strlen(s) == 9 ? v : 0xff000000 | v;
+}
+
 /* ------------------------- config: gruvbox dark ------------------------- */
 #define BARHEIGHT 28
 #define FONTPX    15.0            /* font pixel height                       */
 #define PAD       10              /* bar left/right padding                  */
 #define TAGPAD    8               /* horizontal padding inside a tag         */
 #define SEP       "  |  "
-#define BG        0xff282828      /* bg0                                     */
-#define FG        0xffebdbb2      /* fg1                                     */
-#define ACTIVE    0xffd79921      /* yellow: tag you are on (block)          */
-#define ACTIVE_FG 0xff282828      /* text on the active block                */
-#define URGENT    0xfffb4934      /* bright red                              */
-#define DIM       0xff928374      /* gray: hidden/empty tag                  */
+#define BG        hex("#282828")
+#define FG        hex("#ebdbb2")
+#define ACTIVE    hex("#d79921")
+#define ACTIVE_FG hex("#282828")
+#define URGENT    hex("#fb4934")
+#define DIM       hex("#928374")
 
 /* first font that exists wins; override with MBAR_FONT=/path/to/font.ttf */
 static const char *fontpaths[] = {
