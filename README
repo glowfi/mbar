@@ -1,0 +1,55 @@
+mbar - minimal status bar for mango
+===================================
+Tags on the left, dwmblocks-style blocks on the right. Docks to the
+top edge via layer-shell. Gruvbox dark.
+
+Single C file. Depends on libwayland-client only. Text is anti-aliased
+TTF rendered by the bundled public-domain stb_truetype - no gtk, no
+cairo, no pango, no freetype.
+
+Requirements
+------------
+wayland (libwayland-client + wayland-scanner), a C compiler, make.
+Protocol XMLs are vendored in protocols/.
+
+Installation
+------------
+    make
+    sudo make install
+
+Run mbar from your mango autostart.
+
+Configuration
+-------------
+mbar is configured by editing the config block at the top of bar.c
+and recompiling: colors ("#rrggbb" or "#aarrggbb"), bar height, font
+size, separator, padding.
+
+Fonts: the first existing path in fontpaths[] wins. Override without
+recompiling:
+
+    MBAR_FONT=/path/to/font.ttf mbar
+
+Tags: current = block, urgent = red, hidden = gray. Event-driven via
+ext-workspace-v1.
+
+Blocks
+------
+A block is a function that writes a string. Add it to blocks[]:
+
+    static void blk_bat(char *o, size_t n) {
+            FILE *f = fopen("/sys/class/power_supply/BAT0/capacity", "r");
+            int c = 0; if (f) { fscanf(f, "%d", &c); fclose(f); }
+            snprintf(o, n, "BAT %d%%", c);
+    }
+    static void (*blocks[])(char *, size_t) = { blk_bat, blk_date, blk_time };
+
+For scripts, use blk_cmd with a per-block cache and interval:
+
+    static void blk_vol(char *o, size_t n) {
+            static struct cmdcache c;
+            blk_cmd("volume.sh", 2, &c, o, n);
+    }
+
+Everything redraws once per second; blk_cmd runs its command every
+N seconds and serves the cached line in between.
