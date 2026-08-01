@@ -1,11 +1,16 @@
 mbar - minimal status bar for mango
 ===================================
 Tags on the left, dwmblocks-style blocks on the right. Docks to the
-top edge via layer-shell. Gruvbox dark.
+top edge via layer-shell. Gruvbox dark. UTF-8 aware.
 
-Single C file. Depends on libwayland-client only. Text is anti-aliased
-TTF rendered by the bundled public-domain stb_truetype - no gtk, no
-cairo, no pango, no freetype.
+Single C file. Depends on libwayland-client only. Two text renderers,
+chosen at compile time:
+
+  default    anti-aliased TTF via the bundled public-domain
+             stb_truetype, with font fallbacks (nerd font icons,
+             monochrome emoji). No gtk, cairo, pango or freetype.
+  BITMAP=1   embedded public-domain 8x8 pixel font, ascii only.
+             Needs no font files at all.
 
 Requirements
 ------------
@@ -14,18 +19,26 @@ Protocol XMLs are vendored in protocols/.
 
 Installation
 ------------
-    make
+    make                # ttf renderer
+    make BITMAP=1       # pixel font renderer
     sudo make install
 
-Run mbar from your mango autostart.
+The first build copies config.def.h to config.h. Run mbar from your
+mango autostart.
 
 Configuration
 -------------
-mbar is configured by editing the config block at the top of bar.c
-and recompiling: colors ("#rrggbb" or "#aarrggbb"), bar height, font
-size, separator, padding.
+mbar is configured by editing config.h and (re)compiling, like dwm:
+colors ("#rrggbb" or "#aarrggbb"), bar height, font size, separator,
+padding, fonts and blocks all live there. config.h is yours; it is
+never overwritten and survives make clean. Delete it to start over
+from config.def.h. When switching between ttf and BITMAP=1 builds,
+run make clean first.
 
-Fonts: the first existing path in fontpaths[] wins. Override without
+Fonts (ttf build): the first existing path in fontpaths[] is the
+primary font; fallbackpaths[] are searched for codepoints the primary
+lacks (nerd font symbols, monochrome emoji). Color emoji fonts do not
+work: stb_truetype renders outlines only. Override the primary without
 recompiling:
 
     MBAR_FONT=/path/to/font.ttf mbar
@@ -35,7 +48,8 @@ ext-workspace-v1.
 
 Blocks
 ------
-A block is a function that writes a string. Add it to blocks[]:
+A block is a function that writes a string. Define it in config.h
+and add it to blocks[]:
 
     static void blk_bat(char *o, size_t n) {
             FILE *f = fopen("/sys/class/power_supply/BAT0/capacity", "r");
@@ -44,7 +58,8 @@ A block is a function that writes a string. Add it to blocks[]:
     }
     static void (*blocks[])(char *, size_t) = { blk_bat, blk_date, blk_time };
 
-For scripts, use blk_cmd with a per-block cache and interval:
+For scripts, put them in modules/ and use blk_cmd with a per-block
+cache and interval:
 
     static void blk_vol(char *o, size_t n) {
             static struct cmdcache c;
@@ -52,4 +67,17 @@ For scripts, use blk_cmd with a per-block cache and interval:
     }
 
 Everything redraws once per second; blk_cmd runs its command every
-N seconds and serves the cached line in between.
+N seconds and serves the cached first line in between.
+
+Modules
+-------
+Every file in modules/ is embedded into the binary at build time
+(gen-modules.sh turns them into C strings in modules.h). At runtime
+blk_cmd("name.sh", ...) runs the embedded copy through sh; the binary
+is fully self-contained and needs nothing installed. A name with no
+match in modules/ is run as an ordinary shell command instead, so
+blk_cmd("date +%V", ...) and absolute script paths still work.
+
+Editing a module requires a rebuild; make notices modules/ changed
+and regenerates. Modules run under sh, so shebangs are ignored:
+write POSIX sh, or wrap other interpreters (python3 <<'PY' ... PY).

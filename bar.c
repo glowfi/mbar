@@ -1,6 +1,6 @@
-/* mbar — minimal status bar for mango. tags left, date+time right.
- * deps: libwayland-client only. text: real TTF, rasterized with the
- * public-domain single-header stb_truetype (anti-aliased). */
+/* mbar — minimal status bar for mango. tags left, blocks right.
+ * deps: libwayland-client only. text: TTF via bundled stb_truetype,
+ * utf-8 aware with font fallbacks (nerd font icons, monochrome emoji). */
 #define _GNU_SOURCE
 #include <poll.h>
 #include <stdint.h>
@@ -12,11 +12,17 @@
 #include <unistd.h>
 #include <wayland-client.h>
 
+/* make BITMAP=1 builds with the embedded 8x8 pixel font (no ttf needed) */
+#ifndef BITMAP_FONT
 #define STB_TRUETYPE_IMPLEMENTATION
 #define STBTT_STATIC
 #include "stb_truetype.h"
+#else
+#include "font8x8_basic.h"
+#endif
 #include "ext-workspace-v1-client-protocol.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
+#include "modules.h"           /* generated from modules/ by gen-modules.sh */
 
 /* parse "#RRGGBB" or "#AARRGGBB" -> 0xAARRGGBB */
 static uint32_t hex(const char *s) {
@@ -24,38 +30,24 @@ static uint32_t hex(const char *s) {
 	return strlen(s) == 9 ? v : 0xff000000 | v;
 }
 
-/* ------------------------- config: gruvbox dark ------------------------- */
-#define BARHEIGHT 28
-#define FONTPX    15.0            /* font pixel height                       */
-#define PAD       10              /* bar left/right padding                  */
-#define TAGPAD    8               /* horizontal padding inside a tag         */
-#define SEP       "  |  "
-#define BG        hex("#282828")
-#define FG        hex("#ebdbb2")
-#define ACTIVE    hex("#d79921")
-#define ACTIVE_FG hex("#282828")
-#define URGENT    hex("#fb4934")
-#define DIM       hex("#928374")
-
-/* first font that exists wins; override with MBAR_FONT=/path/to/font.ttf */
-static const char *fontpaths[] = {
-	"/usr/share/fonts/TTF/JetBrainsMono-Regular.ttf",
-	"/usr/share/fonts/TTF/Hack-Regular.ttf",
-	"/usr/share/fonts/TTF/DejaVuSansMono.ttf",
-	"/usr/share/fonts/liberation/LiberationMono-Regular.ttf",
-	"/usr/share/fonts/noto/NotoSansMono-Regular.ttf",
-	"/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
-};
-
 /* ----------------------------- command block ---------------------------- */
 struct cmdcache { char out[128]; int tick; };
 
-/* run cmd every `secs` seconds, serve cached output in between */
+/* embedded module lookup: "weather.sh" -> its script text, else NULL */
+static const char *module_text(const char *name) {
+	for (int i = 0; modules[i].name; i++)
+		if (!strcmp(modules[i].name, name)) return modules[i].text;
+	return NULL;
+}
+
+/* run cmd every `secs` seconds, serve cached output in between.
+ * if cmd names a file from modules/, the embedded copy is run. */
 static void blk_cmd(const char *cmd, int secs, struct cmdcache *c,
                     char *o, size_t n) {
 	if (c->tick-- <= 0) {
 		c->tick = secs - 1;
-		FILE *p = popen(cmd, "r");
+		const char *m = module_text(cmd);
+		FILE *p = popen(m ? m : cmd, "r");
 		c->out[0] = '\0';
 		if (p) {
 			if (fgets(c->out, sizeof c->out, p))
@@ -66,32 +58,23 @@ static void blk_cmd(const char *cmd, int secs, struct cmdcache *c,
 	snprintf(o, n, "%s", c->out);
 }
 
-static void blk_date(char *o, size_t n) {
-	time_t t = time(NULL);
-	strftime(o, n, "%a %d %b %Y", localtime(&t));
-}
-static void blk_time(char *o, size_t n) {
-	time_t t = time(NULL);
-	strftime(o, n, "%H:%M:%S", localtime(&t));
-}
-static void blk_weather(char *o, size_t n) {
-	static struct cmdcache c;
-	blk_cmd("~/.scripts/weather.sh", 600, &c, o, n);   /* every 10min */
-}
-/* right side, dwmblocks style: add a function above, list it here. */
-static void (*blocks[])(char *, size_t) = { blk_date, blk_time };
-/* ------------------------------------------------------------------------ */
+#include "config.h"
 
-#define MAXWS   32
-#define NAMELEN 32
-#define LEN(a)  (sizeof(a) / sizeof(*(a)))
+#define MAXWS    32
+#define NAMELEN  32
+#define MAXFONTS 8
+#define GCACHE   512
+#define LEN(a)   (sizeof(a) / sizeof(*(a)))
 
 struct ws {
 	struct ext_workspace_handle_v1 *h;
 	char name[NAMELEN];
 	uint32_t state;
 };
-struct glyph { unsigned char *bm; int w, h, xo, yo, adv; };
+#ifndef BITMAP_FONT
+struct font  { stbtt_fontinfo info; float scale; };
+struct glyph { uint32_t cp; unsigned char *bm; int w, h, xo, yo, adv; };
+#endif
 
 static struct wl_display *dpy;
 static struct wl_compositor *comp;
@@ -101,47 +84,92 @@ static struct ext_workspace_manager_v1 *ws_mgr;
 static struct wl_surface *surf;
 static struct zwlr_layer_surface_v1 *layer_surf;
 static struct ws wss[MAXWS];
-static struct glyph glyphs[95];        /* ascii 32..126 */
+#ifndef BITMAP_FONT
+static struct font fonts[MAXFONTS];    /* [0] primary, rest fallbacks */
+static struct glyph gcache[GCACHE];    /* glyphs rasterized on demand */
+static int nfonts, nglyphs;
+#endif
 static int font_asc, font_desc;
 static int nws, width, height = BARHEIGHT, running = 1, dirty;
 
 /* ------------------------------- font ---------------------------------- */
-static void init_font(void) {
-	unsigned char *data = NULL;
-	const char *env = getenv("MBAR_FONT"), *used = NULL;
-	for (size_t i = 0; i < LEN(fontpaths) + 1; i++) {
-		const char *p = i == 0 ? env : fontpaths[i - 1];
-		FILE *f = p ? fopen(p, "rb") : NULL;
-		if (!f) continue;
-		fseek(f, 0, SEEK_END);
-		long sz = ftell(f);
-		fseek(f, 0, SEEK_SET);
-		data = malloc(sz);
-		if (fread(data, 1, sz, f) != (size_t)sz) exit(1);
-		fclose(f);
-		used = p;
-		break;
+/* decode one utf-8 codepoint, return bytes consumed */
+static int utf8_decode(const char *s, uint32_t *cp) {
+	const unsigned char *u = (const unsigned char *)s;
+	if (u[0] < 0x80) { *cp = u[0]; return 1; }
+	if ((u[0] & 0xe0) == 0xc0 && u[1]) {
+		*cp = (u[0] & 0x1f) << 6 | (u[1] & 0x3f);
+		return 2;
 	}
-	if (!data) {
+	if ((u[0] & 0xf0) == 0xe0 && u[1] && u[2]) {
+		*cp = (u[0] & 0x0f) << 12 | (u[1] & 0x3f) << 6 | (u[2] & 0x3f);
+		return 3;
+	}
+	if ((u[0] & 0xf8) == 0xf0 && u[1] && u[2] && u[3]) {
+		*cp = (u[0] & 0x07) << 18 | (u[1] & 0x3f) << 12 |
+		      (u[2] & 0x3f) << 6 | (u[3] & 0x3f);
+		return 4;
+	}
+	*cp = '?';
+	return 1;
+}
+
+#ifndef BITMAP_FONT
+static int load_font(const char *path) {
+	FILE *f = path ? fopen(path, "rb") : NULL;
+	if (!f || nfonts == MAXFONTS) return 0;
+	fseek(f, 0, SEEK_END);
+	long sz = ftell(f);
+	fseek(f, 0, SEEK_SET);
+	unsigned char *data = malloc(sz);
+	if (fread(data, 1, sz, f) != (size_t)sz) exit(1);
+	fclose(f);
+	struct font *fo = &fonts[nfonts];
+	if (!stbtt_InitFont(&fo->info, data, stbtt_GetFontOffsetForIndex(data, 0))) {
+		free(data);
+		return 0;
+	}
+	fo->scale = stbtt_ScaleForPixelHeight(&fo->info, FONTPX);
+	fprintf(stderr, "mbar: font %s\n", path);
+	return ++nfonts;
+}
+
+static void init_font(void) {
+	load_font(getenv("MBAR_FONT"));
+	for (size_t i = 0; i < LEN(fontpaths) && !nfonts; i++)
+		load_font(fontpaths[i]);
+	if (!nfonts) {
 		fputs("mbar: no font found, set MBAR_FONT=/path/to/font.ttf\n", stderr);
 		exit(1);
 	}
-	fprintf(stderr, "mbar: font %s\n", used);
-	stbtt_fontinfo f;
-	stbtt_InitFont(&f, data, stbtt_GetFontOffsetForIndex(data, 0));
-	float s = stbtt_ScaleForPixelHeight(&f, FONTPX);
+	for (size_t i = 0; i < LEN(fallbackpaths); i++)
+		load_font(fallbackpaths[i]);
 	int a, d, l;
-	stbtt_GetFontVMetrics(&f, &a, &d, &l);
-	font_asc = a * s + 0.5;
-	font_desc = -d * s + 0.5;
-	for (int c = 32; c < 127; c++) {
-		struct glyph *g = &glyphs[c - 32];
-		int adv, lsb;
-		stbtt_GetCodepointHMetrics(&f, c, &adv, &lsb);
-		g->adv = adv * s + 0.5;
-		g->bm = stbtt_GetCodepointBitmap(&f, s, s, c, &g->w, &g->h,
-		                                 &g->xo, &g->yo);
-	}
+	stbtt_GetFontVMetrics(&fonts[0].info, &a, &d, &l);
+	font_asc = a * fonts[0].scale + 0.5;
+	font_desc = -d * fonts[0].scale + 0.5;
+}
+
+/* rasterize on first use, cache; first font containing the codepoint wins */
+static struct glyph *get_glyph(uint32_t cp) {
+	for (int i = 0; i < nglyphs; i++)
+		if (gcache[i].cp == cp) return &gcache[i];
+	if (nglyphs == GCACHE) nglyphs = 0;   /* wrap: crude, fine for a bar */
+	struct font *f = &fonts[0];
+	for (int i = 0; i < nfonts; i++)
+		if (stbtt_FindGlyphIndex(&fonts[i].info, cp)) {
+			f = &fonts[i];
+			break;
+		}
+	struct glyph *g = &gcache[nglyphs++];
+	free(g->bm);
+	int adv, lsb;
+	stbtt_GetCodepointHMetrics(&f->info, cp, &adv, &lsb);
+	g->cp = cp;
+	g->adv = adv * f->scale + 0.5;
+	g->bm = stbtt_GetCodepointBitmap(&f->info, f->scale, f->scale, cp,
+	                                 &g->w, &g->h, &g->xo, &g->yo);
+	return g;
 }
 
 static uint32_t blend(uint32_t dst, uint32_t fg, unsigned a) {
@@ -151,9 +179,10 @@ static uint32_t blend(uint32_t dst, uint32_t fg, unsigned a) {
 	return 0xff000000 | r << 16 | g << 8 | b;
 }
 static int draw_str(uint32_t *px, const char *s, int x, int base, uint32_t fg) {
-	for (; *s; s++) {
-		if (*s < 32 || *s > 126) continue;
-		struct glyph *g = &glyphs[*s - 32];
+	uint32_t cp;
+	while (*s) {
+		s += utf8_decode(s, &cp);
+		struct glyph *g = get_glyph(cp);
 		for (int y = 0; y < g->h; y++)
 			for (int gx = 0; gx < g->w; gx++) {
 				unsigned a = g->bm[y * g->w + gx];
@@ -167,10 +196,50 @@ static int draw_str(uint32_t *px, const char *s, int x, int base, uint32_t fg) {
 }
 static int text_w(const char *s) {
 	int w = 0;
-	for (; *s; s++)
-		if (*s >= 32 && *s <= 126) w += glyphs[*s - 32].adv;
+	uint32_t cp;
+	while (*s) {
+		s += utf8_decode(s, &cp);
+		w += get_glyph(cp)->adv;
+	}
 	return w;
 }
+
+#else /* BITMAP_FONT: embedded 8x8 pixel font, ascii only, no files */
+static void init_font(void) {
+	font_asc = 8 * FSCALE;
+	font_desc = 0;
+}
+static int draw_str(uint32_t *px, const char *s, int x, int base, uint32_t fg) {
+	int top = base - font_asc;
+	uint32_t cp;
+	while (*s) {
+		s += utf8_decode(s, &cp);
+		int c = cp > 127 ? '?' : (int)cp;
+		for (int y = 0; y < 8; y++)
+			for (int gx = 0; gx < 8; gx++) {
+				if (!(font8x8_basic[c][y] & (1 << gx))) continue;
+				for (int sy = 0; sy < FSCALE; sy++)
+					for (int sx = 0; sx < FSCALE; sx++) {
+						int X = x + gx * FSCALE + sx;
+						int Y = top + y * FSCALE + sy;
+						if (X >= 0 && X < width && Y >= 0 && Y < height)
+							px[Y * width + X] = fg;
+					}
+			}
+		x += 8 * FSCALE;
+	}
+	return x;
+}
+static int text_w(const char *s) {
+	int w = 0;
+	uint32_t cp;
+	while (*s) {
+		s += utf8_decode(s, &cp);
+		w += 8 * FSCALE;
+	}
+	return w;
+}
+#endif /* BITMAP_FONT */
 static void fill(uint32_t *px, int x0, int y0, int w, int h, uint32_t c) {
 	for (int y = y0; y < y0 + h && y < height; y++)
 		for (int x = x0; x < x0 + w && x < width; x++)
