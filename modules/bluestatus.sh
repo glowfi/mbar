@@ -11,12 +11,12 @@ bt_service_up() {
 }
 
 if ! bt_service_up; then
-	echo "ᛒ Off"
+	echo " Off"
 	exit 0
 fi
 
 if ! timeout 1 bluetoothctl show 2>/dev/null | grep -q "Powered: yes"; then
-	echo "ᛒ Off"
+	echo " Off"
 	exit 0
 fi
 
@@ -24,7 +24,7 @@ count=$(timeout 1 bluetoothctl devices Connected 2>/dev/null | grep -c ^Device)
 
 if [ "$count" -eq 1 ]; then
 	name=$(timeout 1 bluetoothctl devices Connected 2>/dev/null | cut -d' ' -f3-)
-	echo "ᛒ $name"
+	echo " $name"
 else
-	echo "ᛒ On [$count]"
+	echo " On [$count]"
 fi
