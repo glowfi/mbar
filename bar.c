@@ -153,7 +153,9 @@ static int load_font(const char *path) {
 		}
 		fo->coloronly = 1;   /* emoji font with no outlines (e.g. joypixels) */
 	} else {
-		fo->scale = stbtt_ScaleForPixelHeight(&fo->info, FONTPX);
+        fo->scale = isfallback
+                ? stbtt_ScaleForMappingEmToPixels(&fo->info, FONTPX)
+                : stbtt_ScaleForPixelHeight(&fo->info, FONTPX);
 	}
 	fprintf(stderr, "mbar: font %s%s\n", path, fo->coloronly ? " (color emoji)" : "");
 	return ++nfonts;
