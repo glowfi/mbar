@@ -64,6 +64,10 @@ static void blk_cmd(const char *cmd, int secs, struct cmdcache *c,
 
 #include "config.h"
 
+#ifndef ICONSCALE
+#define ICONSCALE 1.0   /* size multiplier for fallback (icon/emoji) fonts */
+#endif
+
 #define MAXWS    32
 #define NAMELEN  32
 #define MAXFONTS 8
@@ -130,7 +134,7 @@ static int utf8_decode(const char *s, uint32_t *cp) {
 }
 
 #ifndef BITMAP_FONT
-static int load_font(const char *path) {
+static int load_font(const char *path, int isfallback) {
 	FILE *f = path ? fopen(path, "rb") : NULL;
 	if (!f || nfonts == MAXFONTS) return 0;
 	fseek(f, 0, SEEK_END);
@@ -153,9 +157,11 @@ static int load_font(const char *path) {
 		}
 		fo->coloronly = 1;   /* emoji font with no outlines (e.g. joypixels) */
 	} else {
-        fo->scale = isfallback
-                ? stbtt_ScaleForMappingEmToPixels(&fo->info, FONTPX)
-                : stbtt_ScaleForPixelHeight(&fo->info, FONTPX);
+		/* fallbacks (icon fonts) size by em square: their line metrics
+		 * are inflated, which made icons render tiny next to text */
+		fo->scale = isfallback
+		    ? stbtt_ScaleForMappingEmToPixels(&fo->info, FONTPX * ICONSCALE)
+		    : stbtt_ScaleForPixelHeight(&fo->info, FONTPX);
 	}
 	fprintf(stderr, "mbar: font %s%s\n", path, fo->coloronly ? " (color emoji)" : "");
 	return ++nfonts;
@@ -167,18 +173,18 @@ static int have_textfont(void) {
 	return 0;
 }
 static void init_font(void) {
-	load_font(getenv("MBAR_FONT"));
+	load_font(getenv("MBAR_FONT"), 0);
 	/* keep going down the list until we have a real text font: a color
 	 * emoji font placed early (or as MBAR_FONT) must not become primary */
 	for (size_t i = 0; i < LEN(fontpaths) && !have_textfont(); i++)
-		load_font(fontpaths[i]);
+		load_font(fontpaths[i], 0);
 	if (!have_textfont()) {
 		fputs("mbar: no text font found, set MBAR_FONT=/path/to/font.ttf\n"
 		      "mbar: (color emoji fonts cannot be the primary font)\n", stderr);
 		exit(1);
 	}
 	for (size_t i = 0; i < LEN(fallbackpaths); i++)
-		load_font(fallbackpaths[i]);
+		load_font(fallbackpaths[i], 1);
 	while (fonts[tfont].coloronly) tfont++;
 	int a, d, l;
 	stbtt_GetFontVMetrics(&fonts[tfont].info, &a, &d, &l);
