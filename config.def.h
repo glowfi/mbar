@@ -52,11 +52,41 @@ static void blk_time(char *o, size_t n) {
 	time_t t = time(NULL);
 	strftime(o, n, "%H:%M:%S", localtime(&t));
 }
-static void blk_weather(char *o, size_t n) {
+static void blk_traffic(char *o, size_t n) {
 	static struct cmdcache c;
-	blk_cmd("weather.sh", 600, &c, o, n);   /* modules/weather.sh, 10min */
+	blk_cmd("networkTraffic.sh", 2, &c, o, n);
+}
+static void blk_resources(char *o, size_t n) {
+	static struct cmdcache c;
+	blk_cmd("resources.sh", 5, &c, o, n);
+}
+static void blk_network(char *o, size_t n) {
+	static struct cmdcache c;
+	blk_cmd("network.sh", 10, &c, o, n);
+}
+static void blk_blue(char *o, size_t n) {
+	static struct cmdcache c;
+	blk_cmd("bluestatus.sh", 10, &c, o, n);
+}
+static void blk_volume(char *o, size_t n) {
+	static struct cmdcache c;
+	blk_cmd("volume.sh", 2, &c, o, n);
+}
+static void blk_brightness(char *o, size_t n) {
+	static struct cmdcache c;
+	blk_cmd("brightness.sh", 2, &c, o, n);
+}
+static void blk_battery(char *o, size_t n) {
+	static struct cmdcache c;
+	blk_cmd("battery.sh", 30, &c, o, n);
+}
+static void blk_timedate(char *o, size_t n) {
+	static struct cmdcache c;
+	blk_cmd("time_date.sh", 1, &c, o, n);
 }
 /* right side, dwmblocks style: add a function above, list it here. */
-static void (*blocks[])(char *, size_t) = { blk_date, blk_time };
-/* ------------------------------------------------------------------------ */
+static void (*blocks[])(char *, size_t) = {
+	blk_traffic, blk_resources, blk_network, blk_blue,
+	blk_volume,  blk_brightness, blk_battery, blk_timedate,
+};
 
