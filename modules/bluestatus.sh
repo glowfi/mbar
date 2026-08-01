@@ -1,16 +1,15 @@
-#!/bin/bash
+#!/bin/sh
 
-out1=$(systemctl status bluetooth.service | head -2 | tail -1 | grep -Eo "enabled")
-out2=$(systemctl status bluetoothd.service | grep -Eo "started")
-
-if [[ "$out1" != "" ]]; then
-	out="${out1}"
-elif [[ "$out2" != "" ]]; then
-	out="${out2}"
+if ! bluetoothctl show 2>/dev/null | grep -q "Powered: yes"; then
+	echo "ᛒ Off"
+	exit 0
 fi
 
-if [[ "$out" = "" ]]; then
-	echo " Off"
+count=$(bluetoothctl devices Connected 2>/dev/null | grep -c ^Device)
+
+if [ "$count" -eq 1 ]; then
+	name=$(bluetoothctl devices Connected | cut -d' ' -f3-)
+	echo "ᛒ $name"
 else
-	echo " On [$(bluetoothctl devices Connected | wc -l | xargs)]"
+	echo "ᛒ On [$count]"
 fi
