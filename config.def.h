@@ -92,7 +92,7 @@ static void blk_layout(char *o, size_t n) {
 }
 /* right side, dwmblocks style: add a function above, list it here. */
 static void (*blocks[])(char *, size_t) = {
-	blk_layout, ,blk_traffic, blk_resources, blk_network, blk_blue,
+	blk_layout, blk_traffic, blk_resources, blk_network, blk_blue,
 	blk_volume,  blk_brightness, blk_battery, blk_timedate,
 };
 
