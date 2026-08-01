@@ -7,8 +7,10 @@ Single C file. Depends on libwayland-client only. Two text renderers,
 chosen at compile time:
 
   default    anti-aliased TTF via the bundled public-domain
-             stb_truetype, with font fallbacks (nerd font icons,
-             monochrome emoji). No gtk, cairo, pango or freetype.
+             stb_truetype, with font fallbacks: nerd font icons
+             (tinted) and full-color emoji (joypixels, NotoColorEmoji;
+             CBDT pngs decoded by the bundled stb_image). No gtk,
+             cairo, pango or freetype.
   BITMAP=1   embedded public-domain 8x8 pixel font, ascii only.
              Needs no font files at all.
 
@@ -37,9 +39,10 @@ run make clean first.
 
 Fonts (ttf build): the first existing path in fontpaths[] is the
 primary font; fallbackpaths[] are searched for codepoints the primary
-lacks (nerd font symbols, monochrome emoji). Color emoji fonts do not
-work: stb_truetype renders outlines only. Override the primary without
-recompiling:
+lacks. Nerd font symbols render tinted with FG; color emoji fonts
+(joypixels, NotoColorEmoji) render in full color. Emoji are drawn per
+codepoint: ZWJ sequences and flags show as their components, skin
+tone modifiers as swatches. Override the primary without recompiling:
 
     MBAR_FONT=/path/to/font.ttf mbar
 
