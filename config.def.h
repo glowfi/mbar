@@ -16,6 +16,7 @@
 #ifndef BITMAP_FONT
 /* primary font: first that exists wins; override: MBAR_FONT=/path/font.ttf */
 static const char *fontpaths[] = {
+	"/usr/share/fonts/joypixels/JoyPixels.ttf",
 	"/usr/share/fonts/TTF/JetBrainsMonoNerdFont-Regular.ttf",
 	"/usr/share/fonts/TTF/JetBrainsMono-Regular.ttf",
 	"/usr/share/fonts/TTF/Hack-Regular.ttf",
