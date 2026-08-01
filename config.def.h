@@ -16,7 +16,6 @@
 #ifndef BITMAP_FONT
 /* primary font: first that exists wins; override: MBAR_FONT=/path/font.ttf */
 static const char *fontpaths[] = {
-	"/usr/share/fonts/joypixels/JoyPixels.ttf",
 	"/usr/share/fonts/TTF/JetBrainsMonoNerdFont-Regular.ttf",
 	"/usr/share/fonts/TTF/JetBrainsMono-Regular.ttf",
 	"/usr/share/fonts/TTF/Hack-Regular.ttf",
@@ -29,6 +28,7 @@ static const char *fontpaths[] = {
  * monochrome fonts only (nerd icons, NotoEmoji) — color emoji fonts
  * (NotoColorEmoji) store PNGs which stb_truetype cannot render. */
 static const char *fallbackpaths[] = {
+	"/usr/share/fonts/joypixels/JoyPixels.ttf",
 	"/usr/share/fonts/TTF/SymbolsNerdFont-Regular.ttf",
 	"/usr/share/fonts/TTF/SymbolsNerdFontMono-Regular.ttf",
 	"/usr/share/fonts/noto/NotoEmoji-Regular.ttf",

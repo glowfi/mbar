@@ -102,7 +102,7 @@ static struct ws wss[MAXWS];
 #ifndef BITMAP_FONT
 static struct font fonts[MAXFONTS];    /* [0] primary, rest fallbacks */
 static struct glyph gcache[GCACHE];    /* glyphs rasterized on demand */
-static int nfonts, nglyphs;
+static int nfonts, nglyphs, tfont;   /* tfont: first outline font */
 #endif
 static int font_asc, font_desc;
 static int nws, width, height = BARHEIGHT, running = 1, dirty;
@@ -159,20 +159,29 @@ static int load_font(const char *path) {
 	return ++nfonts;
 }
 
+static int have_textfont(void) {
+	for (int i = 0; i < nfonts; i++)
+		if (!fonts[i].coloronly) return 1;
+	return 0;
+}
 static void init_font(void) {
 	load_font(getenv("MBAR_FONT"));
-	for (size_t i = 0; i < LEN(fontpaths) && !nfonts; i++)
+	/* keep going down the list until we have a real text font: a color
+	 * emoji font placed early (or as MBAR_FONT) must not become primary */
+	for (size_t i = 0; i < LEN(fontpaths) && !have_textfont(); i++)
 		load_font(fontpaths[i]);
-	if (!nfonts) {
-		fputs("mbar: no font found, set MBAR_FONT=/path/to/font.ttf\n", stderr);
+	if (!have_textfont()) {
+		fputs("mbar: no text font found, set MBAR_FONT=/path/to/font.ttf\n"
+		      "mbar: (color emoji fonts cannot be the primary font)\n", stderr);
 		exit(1);
 	}
 	for (size_t i = 0; i < LEN(fallbackpaths); i++)
 		load_font(fallbackpaths[i]);
+	while (fonts[tfont].coloronly) tfont++;
 	int a, d, l;
-	stbtt_GetFontVMetrics(&fonts[0].info, &a, &d, &l);
-	font_asc = a * fonts[0].scale + 0.5;
-	font_desc = -d * fonts[0].scale + 0.5;
+	stbtt_GetFontVMetrics(&fonts[tfont].info, &a, &d, &l);
+	font_asc = a * fonts[tfont].scale + 0.5;
+	font_desc = -d * fonts[tfont].scale + 0.5;
 }
 
 /* ------------------- color emoji (CBDT/CBLC, e.g. joypixels) ------------ */
@@ -302,27 +311,31 @@ static struct glyph *get_glyph(uint32_t cp) {
 	for (int i = 0; i < nglyphs; i++)
 		if (gcache[i].cp == cp) return &gcache[i];
 	if (nglyphs == GCACHE) nglyphs = 0;   /* wrap: crude, fine for a bar */
-	struct font *f = &fonts[0];
-	int gid = font_gid(f, cp);
-	for (int i = 0; !gid && i < nfonts; i++)
-		if ((gid = font_gid(&fonts[i], cp)))
-			f = &fonts[i];
 	struct glyph *g = &gcache[nglyphs++];
 	free(g->bm);  g->bm = NULL;
 	free(g->cbm); g->cbm = NULL;
 	g->color = 0;
 	g->cp = cp;
-	if (cbdt_load(f, gid, g))              /* color emoji path */
-		return g;
-	if (f->coloronly) {                     /* color font, png missing */
-		g->w = g->h = 0;
-		g->adv = font_asc / 2;
+	for (int i = 0; i < nfonts; i++) {
+		struct font *f = &fonts[i];
+		int gid = font_gid(f, cp);
+		if (!gid) continue;
+		if (cbdt_load(f, gid, g))          /* color emoji png */
+			return g;
+		if (f->coloronly) continue;        /* claims cp, has no png: skip */
+		int adv, lsb;
+		stbtt_GetCodepointHMetrics(&f->info, cp, &adv, &lsb);
+		g->adv = adv * f->scale + 0.5;
+		g->bm = stbtt_GetCodepointBitmap(&f->info, f->scale, f->scale, cp,
+		                                 &g->w, &g->h, &g->xo, &g->yo);
 		return g;
 	}
+	/* no font has it: draw ? from the text font */
+	struct font *f = &fonts[tfont];
 	int adv, lsb;
-	stbtt_GetCodepointHMetrics(&f->info, cp, &adv, &lsb);
+	stbtt_GetCodepointHMetrics(&f->info, '?', &adv, &lsb);
 	g->adv = adv * f->scale + 0.5;
-	g->bm = stbtt_GetCodepointBitmap(&f->info, f->scale, f->scale, cp,
+	g->bm = stbtt_GetCodepointBitmap(&f->info, f->scale, f->scale, '?',
 	                                 &g->w, &g->h, &g->xo, &g->yo);
 	return g;
 }
