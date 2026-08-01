@@ -86,9 +86,13 @@ static void blk_timedate(char *o, size_t n) {
 	static struct cmdcache c;
 	blk_cmd("time_date.sh", 1, &c, o, n);
 }
+static void blk_layout(char *o, size_t n) {
+	static struct cmdcache c;
+	blk_cmd("layout.sh", 2, &c, o, n);
+}
 /* right side, dwmblocks style: add a function above, list it here. */
 static void (*blocks[])(char *, size_t) = {
-	blk_traffic, blk_resources, blk_network, blk_blue,
+	blk_layout, ,blk_traffic, blk_resources, blk_network, blk_blue,
 	blk_volume,  blk_brightness, blk_battery, blk_timedate,
 };
 
