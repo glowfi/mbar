@@ -28,6 +28,7 @@ static const char *fontpaths[] = {
  * monochrome fonts only (nerd icons, NotoEmoji) — color emoji fonts
  * (NotoColorEmoji) store PNGs which stb_truetype cannot render. */
 static const char *fallbackpaths[] = {
+	"/usr/share/fonts/TTF/FantasqueSansMNerdFont-Regular.ttf",
 	"/usr/share/fonts/joypixels/JoyPixels.ttf",
 	"/usr/share/fonts/TTF/SymbolsNerdFont-Regular.ttf",
 	"/usr/share/fonts/TTF/SymbolsNerdFontMono-Regular.ttf",
