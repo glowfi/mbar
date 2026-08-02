@@ -1,7 +1,7 @@
 #!/bin/sh
 
 BAT=$(ls -d /sys/class/power_supply/BAT* 2>/dev/null | head -1)
-[ -z "$BAT" ] && exit 0
+[ -z "$BAT" ] && echo "device not on battery"
 
 read -r cap <"$BAT/capacity"
 read -r status <"$BAT/status"
