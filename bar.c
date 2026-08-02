@@ -3,6 +3,7 @@
  * utf-8 aware with font fallbacks (nerd font icons, monochrome emoji). */
 #define _GNU_SOURCE
 #include <poll.h>
+#include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -35,7 +36,7 @@ static uint32_t hex(const char *s) {
 }
 
 /* ----------------------------- command block ---------------------------- */
-struct cmdcache { char out[128]; int tick; };
+struct cmdcache { char out[128]; time_t next; };
 
 /* embedded module lookup: "weather.sh" -> its script text, else NULL */
 static const char *module_text(const char *name) {
@@ -48,8 +49,9 @@ static const char *module_text(const char *name) {
  * if cmd names a file from modules/, the embedded copy is run. */
 static void blk_cmd(const char *cmd, int secs, struct cmdcache *c,
                     char *o, size_t n) {
-	if (c->tick-- <= 0) {
-		c->tick = secs - 1;
+	time_t now = time(NULL);
+	if (now >= c->next) {
+		c->next = now + secs;
 		const char *m = module_text(cmd);
 		FILE *p = popen(m ? m : cmd, "r");
 		c->out[0] = '\0';
@@ -110,6 +112,9 @@ static int nfonts, nglyphs, tfont;   /* tfont: first outline font */
 #endif
 static int font_asc, font_desc;
 static int nws, width, height = BARHEIGHT, running = 1, dirty;
+static char blockline[256];            /* rendered right side, worker-owned */
+static pthread_mutex_t blocklock = PTHREAD_MUTEX_INITIALIZER;
+static int wakepipe[2];                /* worker -> main loop wakeups */
 
 /* ------------------------------- font ---------------------------------- */
 /* decode one utf-8 codepoint, return bytes consumed */
@@ -478,13 +483,11 @@ static void draw(void) {
 		x += cw;
 	}
 
-	/* right: blocks */
-	char line[256] = "", b[64];
-	for (size_t i = 0; i < LEN(blocks); i++) {
-		blocks[i](b, sizeof b);
-		if (i) strncat(line, SEP, sizeof line - strlen(line) - 1);
-		strncat(line, b, sizeof line - strlen(line) - 1);
-	}
+	/* right: blocks (line prepared by the worker thread) */
+	char line[256];
+	pthread_mutex_lock(&blocklock);
+	memcpy(line, blockline, sizeof line);
+	pthread_mutex_unlock(&blocklock);
 	draw_str(px, line, width - PAD - text_w(line), base, FG);
 
 	struct wl_shm_pool *pool = wl_shm_create_pool(shm, fd, size);
@@ -498,6 +501,31 @@ static void draw(void) {
 	wl_surface_damage_buffer(surf, 0, 0, INT32_MAX, INT32_MAX);
 	wl_surface_commit(surf);
 	dirty = 0;
+}
+
+/* --------------------------- block worker -------------------------------
+ * blocks (and their scripts) run here, once per second, so a slow script
+ * can never delay tag updates or redraws in the main loop. */
+static void *blocks_thread(void *arg) {
+	(void)arg;
+	char line[256], b[64];
+	for (;;) {
+		line[0] = '\0';
+		for (size_t i = 0; i < LEN(blocks); i++) {
+			blocks[i](b, sizeof b);
+			if (i) strncat(line, SEP, sizeof line - strlen(line) - 1);
+			strncat(line, b, sizeof line - strlen(line) - 1);
+		}
+		pthread_mutex_lock(&blocklock);
+		memcpy(blockline, line, sizeof blockline);
+		pthread_mutex_unlock(&blocklock);
+		if (write(wakepipe[1], "x", 1) < 0) {}
+		struct timespec ts;
+		clock_gettime(CLOCK_REALTIME, &ts);
+		struct timespec s = { 0, 1000000000L - ts.tv_nsec };
+		nanosleep(&s, NULL);       /* sleep to the next second boundary */
+	}
+	return NULL;
 }
 
 /* ------------------------ ext-workspace events -------------------------- */
@@ -601,26 +629,33 @@ int main(void) {
 	zwlr_layer_surface_v1_set_exclusive_zone(layer_surf, BARHEIGHT);
 	wl_surface_commit(surf);
 
+	if (pipe(wakepipe) < 0) return 1;
+	pthread_t bt;
+	pthread_create(&bt, NULL, blocks_thread, NULL);
+
 	int fd = wl_display_get_fd(dpy);
-	time_t last = 0;
 	while (running) {
 		while (wl_display_prepare_read(dpy) != 0)
 			wl_display_dispatch_pending(dpy);
 		wl_display_flush(dpy);
 
-		struct timespec ts;
-		clock_gettime(CLOCK_REALTIME, &ts);
-		int timeout = 1000 - ts.tv_nsec / 1000000 + 10; /* next second */
-
-		struct pollfd p = { .fd = fd, .events = POLLIN };
-		if (poll(&p, 1, timeout) > 0 && (p.revents & POLLIN)) {
-			wl_display_read_events(dpy);
+		struct pollfd p[2] = {
+			{ .fd = fd,          .events = POLLIN },
+			{ .fd = wakepipe[0], .events = POLLIN },
+		};
+		poll(p, 2, 1000);
+		if (p[0].revents & POLLIN) {
+			wl_display_read_events(dpy);      /* tag events set dirty */
 			wl_display_dispatch_pending(dpy);
 		} else {
 			wl_display_cancel_read(dpy);
 		}
-		time_t now = time(NULL);
-		if (dirty || now != last) { last = now; draw(); }
+		if (p[1].revents & POLLIN) {          /* worker refreshed blocks */
+			char junk[16];
+			if (read(wakepipe[0], junk, sizeof junk) < 0) {}
+			dirty = 1;
+		}
+		if (dirty) draw();
 	}
 	return 0;
 }

@@ -1,6 +1,6 @@
 CC      ?= cc
 CFLAGS  ?= -O2 -Wall -Wextra -Wno-unused-parameter -Wno-unused-function
-LDLIBS   = -lwayland-client -lm
+LDLIBS   = -lwayland-client -lm -lpthread
 SCANNER  = wayland-scanner
 
 # make BITMAP=1 builds with the embedded 8x8 pixel font instead of ttf
