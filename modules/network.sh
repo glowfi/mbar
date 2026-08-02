@@ -1,12 +1,10 @@
 #!/bin/sh
 
-CONNAME=$(nmcli -a | grep 'Wired connection' | awk 'NR==1{print $1}')
+con=$(nmcli -t -f NAME,TYPE connection show --active 2>/dev/null |
+	awk -F: '/ethernet|wireless/ {print $1; exit}')
 
-if [ "$CONNAME" = "" ]; then
-	CONNAME=$(nmcli -t -f active,ssid dev wifi | grep '^yes' | cut -c 5-)
-fi
-if [ "$CONNAME" = "" ]; then
-	printf "❌ %s\n" "noWifi"
+if [ -n "$con" ]; then
+	printf '🌐 %s\n' "$con"
 else
-	printf "🌐 %s\n" "$CONNAME"
+	printf '❌ offline\n'
 fi

@@ -1,10 +1,13 @@
 #!/bin/sh
 
-CHARGE=$(upower -i /org/freedesktop/UPower/devices/battery_BAT0 | grep "percentage" | xargs | awk -F":" '{print $2}' | xargs)
-STATUS=$(upower -i /org/freedesktop/UPower/devices/battery_BAT0 | grep "state" | xargs | awk -F":" '{print $2}' | xargs)
+BAT=$(ls -d /sys/class/power_supply/BAT* 2>/dev/null | head -1)
+[ -z "$BAT" ] && exit 0
 
-if [ "$STATUS" = "Charging" ]; then
-	printf "🔌 %s %s" "$CHARGE" "$STATUS"
-else
-	printf "🔋 %s %s" "$CHARGE" "$STATUS"
-fi
+read -r cap <"$BAT/capacity"
+read -r status <"$BAT/status"
+
+case "$status" in
+Charging) icon=🔌 ;;
+*) icon=🔋 ;;
+esac
+printf '%s %s%% %s\n' "$icon" "$cap" "$status"

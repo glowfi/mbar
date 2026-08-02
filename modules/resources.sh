@@ -1,21 +1,22 @@
 #!/bin/sh
 
-df_check_location='/home'
+# memory
+mem=$(free -h --si | awk '/^Mem/ {printf "%s/%s", $3, $2}')
 
-# Get all the infos first to avoid high resources usage
-free_output=$(free -h --si | grep Mem)
-df_output=$(df -h $df_check_location | tail -n 1)
+# cpu usage since last call (cached, like traffic)
+cache=${XDG_CACHE_HOME:-$HOME/.cache}/cpu_last
+read -r _ u n s idle rest </proc/stat
+total=$((u + n + s + idle))
+[ -f "$cache" ] && read -r ot oi <"$cache" || {
+	ot=0
+	oi=0
+}
+printf '%d %d\n' "$total" "$idle" >"$cache"
+dt=$((total - ot))
+di=$((idle - oi))
+[ "$dt" -gt 0 ] && cpu=$(((dt - di) * 100 / dt)) || cpu=0
 
-# Used and total memory
-MEMUSED=$(echo $free_output | awk '{print $3}')
-MEMTOT=$(echo $free_output | awk '{print $2}')
+# storage
+sto=$(df -h /home | awk 'NR==2 {printf "%s/%s:%s", $3, $2, $5}')
 
-# CPU temperature
-CPU=$(top -bn1 | grep Cpu | awk '{print $2}')%
-
-# Used and total storage in /home (rounded to 1024B)
-STOUSED=$(echo $df_output | awk '{print $3}')
-STOTOT=$(echo $df_output | awk '{print $2}')
-STOPER=$(echo $df_output | awk '{print $5}')
-
-printf "🧠 %s/%s  🖥 %s  💾 %s/%s:%s" "$MEMUSED" "$MEMTOT" "$CPU" "$STOUSED" "$STOTOT" "$STOPER"
+printf '🧠 %s  🖥 %s%%  💾 %s\n' "$mem" "$cpu" "$sto"
