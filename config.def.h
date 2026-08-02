@@ -3,7 +3,7 @@
 /* appearance: gruvbox dark */
 #define BARHEIGHT 28
 #define ICONSCALE 1.0             /* fallback icon/emoji font size multiplier */
-#define FONTPX    15.5            /* font pixel height                       */
+#define FONTPX    16.0            /* font pixel height                       */
 #define PAD       10              /* bar left/right padding                  */
 #define TAGPAD    8               /* horizontal padding inside a tag         */
 #define SEP       "  |  "
@@ -29,7 +29,7 @@ static const char *fontpaths[] = {
  * monochrome fonts only (nerd icons, NotoEmoji) — color emoji fonts
  * (NotoColorEmoji) store PNGs which stb_truetype cannot render. */
 static const char *fallbackpaths[] = {
-	"/usr/share/fonts/TTF/FantasqueSansMNerdFont-Regular.ttf",
+	"/usr/share/fonts/TTF/FantasqueSansMNerdFont-Bold.ttf",
 	"/usr/share/fonts/joypixels/JoyPixels.ttf",
 	"/usr/share/fonts/TTF/SymbolsNerdFont-Regular.ttf",
 	"/usr/share/fonts/TTF/SymbolsNerdFontMono-Regular.ttf",
