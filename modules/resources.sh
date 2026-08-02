@@ -19,4 +19,4 @@ di=$((idle - oi))
 # storage
 sto=$(df -h /home | awk 'NR==2 {printf "%s/%s:%s", $3, $2, $5}')
 
-printf '🧠 %s  🖥 %s%%  💾 %s\n' "$mem" "$cpu" "$sto"
+printf '🧠 %s  🔲 %s%%  💾 %s\n' "$mem" "$cpu" "$sto"
