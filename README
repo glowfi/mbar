@@ -59,7 +59,15 @@ and add it to blocks[]:
             int c = 0; if (f) { fscanf(f, "%d", &c); fclose(f); }
             snprintf(o, n, "BAT %d%%", c);
     }
-    static void (*blocks[])(char *, size_t) = { blk_bat, blk_date, blk_time };
+    static const struct block blocks[] = {
+            { blk_bat,  NULL },
+            { blk_date, NULL },
+            { blk_time, "foot -e sh -c 'cal -3; read _'" },
+    };
+
+Each block may carry a click command, run detached on left click
+(terminal programs need a terminal, e.g. "foot -e nmtui"). Clicking
+a workspace tag switches to it.
 
 For scripts, put them in modules/ and use blk_cmd with a per-block
 cache and interval:

@@ -4,6 +4,7 @@
 #define _GNU_SOURCE
 #include <poll.h>
 #include <pthread.h>
+#include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -64,7 +65,25 @@ static void blk_cmd(const char *cmd, int secs, struct cmdcache *c,
 	snprintf(o, n, "%s", c->out);
 }
 
+#define LEN(a)   (sizeof(a) / sizeof(*(a)))
+
+/* a block: text function + optional shell command run on left click */
+struct block {
+	void (*fn)(char *, size_t);
+	const char *click;
+};
+
+/* run a command detached from the bar (never blocks the ui) */
+static void spawn(const char *cmd) {
+	if (!cmd || fork() != 0) return;
+	setsid();
+	execl("/bin/sh", "sh", "-c", cmd, (char *)NULL);
+	_exit(127);
+}
+
 #include "config.h"
+
+#define NBLOCKS ((int)LEN(blocks))
 
 #ifndef ICONSCALE
 #define ICONSCALE 1.0   /* size multiplier for fallback (icon/emoji) fonts */
@@ -74,7 +93,6 @@ static void blk_cmd(const char *cmd, int secs, struct cmdcache *c,
 #define NAMELEN  32
 #define MAXFONTS 8
 #define GCACHE   512
-#define LEN(a)   (sizeof(a) / sizeof(*(a)))
 
 struct ws {
 	struct ext_workspace_handle_v1 *h;
@@ -112,9 +130,17 @@ static int nfonts, nglyphs, tfont;   /* tfont: first outline font */
 #endif
 static int font_asc, font_desc;
 static int nws, width, height = BARHEIGHT, running = 1, dirty;
-static char blockline[256];            /* rendered right side, worker-owned */
+static char btxt[64][64];             /* per-block text, worker-owned */
 static pthread_mutex_t blocklock = PTHREAD_MUTEX_INITIALIZER;
 static int wakepipe[2];                /* worker -> main loop wakeups */
+struct span { int x0, x1; };
+static struct span bspans[64];         /* block hitboxes (main thread) */
+static struct span tspans[MAXWS];      /* tag hitboxes */
+static struct ext_workspace_handle_v1 *thandles[MAXWS];
+static int ntspans;
+static struct wl_seat *seat;
+static struct wl_pointer *pointer;
+static int ptrx = -1, ptrin;           /* pointer x, pointer-on-bar flag */
 
 /* ------------------------------- font ---------------------------------- */
 /* decode one utf-8 codepoint, return bytes consumed */
@@ -468,9 +494,12 @@ static void draw(void) {
 
 	/* left: tags */
 	qsort(wss, nws, sizeof(*wss), ws_cmp);
+	ntspans = nws;
 	int x = PAD;
 	for (int i = 0; i < nws; i++) {
 		int cw = text_w(wss[i].name) + 2 * TAGPAD;
+		tspans[i] = (struct span){ x, x + cw };
+		thandles[i] = wss[i].h;
 		if (wss[i].state & EXT_WORKSPACE_HANDLE_V1_STATE_ACTIVE) {
 			fill(px, x, 0, cw, height, ACTIVE);
 			draw_str(px, wss[i].name, x + TAGPAD, base, ACTIVE_FG);
@@ -483,12 +512,21 @@ static void draw(void) {
 		x += cw;
 	}
 
-	/* right: blocks (line prepared by the worker thread) */
-	char line[256];
+	/* right: blocks (texts prepared by the worker thread) */
+	char cells[64][64];
 	pthread_mutex_lock(&blocklock);
-	memcpy(line, blockline, sizeof line);
+	memcpy(cells, btxt, sizeof cells);
 	pthread_mutex_unlock(&blocklock);
-	draw_str(px, line, width - PAD - text_w(line), base, FG);
+	int total = 0, sepw = text_w(SEP);
+	for (int i = 0; i < NBLOCKS; i++)
+		total += text_w(cells[i]) + (i ? sepw : 0);
+	x = width - PAD - total;
+	for (int i = 0; i < NBLOCKS; i++) {
+		if (i) x = draw_str(px, SEP, x, base, FG);
+		bspans[i].x0 = x;
+		x = draw_str(px, cells[i], x, base, FG);
+		bspans[i].x1 = x;
+	}
 
 	struct wl_shm_pool *pool = wl_shm_create_pool(shm, fd, size);
 	struct wl_buffer *buf =
@@ -508,16 +546,15 @@ static void draw(void) {
  * can never delay tag updates or redraws in the main loop. */
 static void *blocks_thread(void *arg) {
 	(void)arg;
-	char line[256], b[64];
+	char b[64];
 	for (;;) {
-		line[0] = '\0';
-		for (size_t i = 0; i < LEN(blocks); i++) {
-			blocks[i](b, sizeof b);
-			if (i) strncat(line, SEP, sizeof line - strlen(line) - 1);
-			strncat(line, b, sizeof line - strlen(line) - 1);
+		char tmp[64][64];
+		for (int i = 0; i < NBLOCKS; i++) {
+			blocks[i].fn(b, sizeof b);
+			snprintf(tmp[i], sizeof tmp[i], "%s", b);
 		}
 		pthread_mutex_lock(&blocklock);
-		memcpy(blockline, line, sizeof blockline);
+		memcpy(btxt, tmp, sizeof tmp);
 		pthread_mutex_unlock(&blocklock);
 		if (write(wakepipe[1], "x", 1) < 0) {}
 		struct timespec ts;
@@ -569,6 +606,59 @@ static const struct ext_workspace_manager_v1_listener mgr_lis = {
 	mgr_group, mgr_ws, mgr_done, mgr_fin,
 };
 
+/* ------------------------------ pointer --------------------------------- */
+#define BTN_LEFT 0x110
+
+static void click(int x) {
+	for (int i = 0; i < ntspans; i++)
+		if (x >= tspans[i].x0 && x < tspans[i].x1) {
+			if (ws_mgr) {
+				ext_workspace_handle_v1_activate(thandles[i]);
+				ext_workspace_manager_v1_commit(ws_mgr);
+				wl_display_flush(dpy);
+			}
+			return;
+		}
+	for (int i = 0; i < NBLOCKS; i++)
+		if (x >= bspans[i].x0 && x < bspans[i].x1) {
+			spawn(blocks[i].click);
+			return;
+		}
+}
+
+static void ptr_enter(void *d, struct wl_pointer *p, uint32_t serial,
+                      struct wl_surface *s, wl_fixed_t sx, wl_fixed_t sy) {
+	ptrin = (s == surf);
+	ptrx = wl_fixed_to_int(sx);
+}
+static void ptr_leave(void *d, struct wl_pointer *p, uint32_t serial,
+                      struct wl_surface *s) {
+	ptrin = 0;
+}
+static void ptr_motion(void *d, struct wl_pointer *p, uint32_t t,
+                       wl_fixed_t sx, wl_fixed_t sy) {
+	ptrx = wl_fixed_to_int(sx);
+}
+static void ptr_button(void *d, struct wl_pointer *p, uint32_t serial,
+                       uint32_t t, uint32_t button, uint32_t state) {
+	if (ptrin && button == BTN_LEFT && state == WL_POINTER_BUTTON_STATE_PRESSED)
+		click(ptrx);
+}
+static void ptr_axis(void *d, struct wl_pointer *p, uint32_t t,
+                     uint32_t axis, wl_fixed_t v) {}
+static const struct wl_pointer_listener ptr_lis = {
+	ptr_enter, ptr_leave, ptr_motion, ptr_button, ptr_axis,
+};
+
+static void seat_caps(void *d, struct wl_seat *s, uint32_t caps) {
+	if ((caps & WL_SEAT_CAPABILITY_POINTER) && !pointer) {
+		pointer = wl_seat_get_pointer(s);
+		wl_pointer_add_listener(pointer, &ptr_lis, NULL);
+	}
+}
+static void seat_name(void *d, struct wl_seat *s, const char *n) {}
+static const struct wl_seat_listener seat_lis = { seat_caps, seat_name };
+
 /* --------------------------- layer surface ------------------------------ */
 static void ls_configure(void *d, struct zwlr_layer_surface_v1 *ls,
                          uint32_t serial, uint32_t w, uint32_t h) {
@@ -595,12 +685,17 @@ static void reg_global(void *d, struct wl_registry *r, uint32_t name,
 		layer_shell = wl_registry_bind(r, name, &zwlr_layer_shell_v1_interface, 1);
 	else if (!strcmp(iface, ext_workspace_manager_v1_interface.name))
 		ws_mgr = wl_registry_bind(r, name, &ext_workspace_manager_v1_interface, 1);
+	else if (!strcmp(iface, wl_seat_interface.name) && !seat) {
+		seat = wl_registry_bind(r, name, &wl_seat_interface, 1);
+		wl_seat_add_listener(seat, &seat_lis, NULL);
+	}
 }
 static void reg_remove(void *d, struct wl_registry *r, uint32_t name) {}
 static const struct wl_registry_listener reg_lis = { reg_global, reg_remove };
 
 /* ------------------------------- main ----------------------------------- */
 int main(void) {
+	signal(SIGCHLD, SIG_IGN);   /* no zombie click commands */
 	init_font();
 	if (!(dpy = wl_display_connect(NULL))) {
 		fputs("mbar: cannot connect to wayland display\n", stderr);

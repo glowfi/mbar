@@ -91,9 +91,16 @@ static void blk_layout(char *o, size_t n) {
 	static struct cmdcache c;
 	blk_cmd("layout.sh", 1, &c, o, n);
 }
-/* right side, dwmblocks style: add a function above, list it here. */
-static void (*blocks[])(char *, size_t) = {
-	blk_layout, blk_traffic, blk_resources, blk_network, blk_blue,
-	blk_volume,  blk_brightness, blk_battery, blk_timedate,
+/* right side, dwmblocks style: { function, click command or NULL }.
+ * click command runs detached on left click; TUI apps need a terminal. */
+static const struct block blocks[] = {
+	{ blk_layout,     NULL },
+	{ blk_traffic,    NULL },
+	{ blk_resources,  "kitty -e 'btop'" },
+	{ blk_network,    "kitty -e 'nmtui'" },
+	{ blk_blue,       "blueman-manager" },
+	{ blk_volume,     "kitty -e 'nmtui'" },
+	{ blk_brightness, NULL },
+	{ blk_battery,    NULL },
+	{ blk_timedate,   "kitty sh -c 'cal -y; read _'" },
 };
-
