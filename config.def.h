@@ -99,7 +99,7 @@ static const struct block blocks[] = {
 	{ blk_resources,  "kitty -e 'btop'" },
 	{ blk_network,    "kitty -e 'nmtui'" },
 	{ blk_blue,       "blueman-manager" },
-	{ blk_volume,     "kitty -e 'nmtui'" },
+	{ blk_volume,     "kitty -e 'pulsemixer'" },
 	{ blk_brightness, NULL },
 	{ blk_battery,    NULL },
 	{ blk_timedate,   "kitty sh -c 'cal -y; read _'" },
