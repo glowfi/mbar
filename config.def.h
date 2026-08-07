@@ -3,7 +3,7 @@
 /* appearance: gruvbox dark */
 #define BARHEIGHT 30
 #define ICONSCALE 1.0             /* fallback icon/emoji font size multiplier */
-#define FONTPX    18.0            /* font pixel height                       */
+#define FONTPX    16.0            /* font pixel height                       */
 #define PAD       10              /* bar left/right padding                  */
 #define TAGPAD    8               /* horizontal padding inside a tag         */
 #define SEP       "  |  "
