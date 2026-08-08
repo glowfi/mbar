@@ -83,6 +83,10 @@ static void blk_battery(char *o, size_t n) {
 	static struct cmdcache c;
 	blk_cmd("battery.sh", 1, &c, o, n);
 }
+static void blk_night(char *o, size_t n) {
+	static struct cmdcache c;
+	blk_cmd("nightlight.sh", 1, &c, o, n);
+}
 static void blk_timedate(char *o, size_t n) {
 	static struct cmdcache c;
 	blk_cmd("time_date.sh", 1, &c, o, n);
@@ -106,6 +110,14 @@ static const struct block blocks[] = {
       "power-saver) n=balanced;; balanced) n=performance;; "
       "*) n=power-saver;; esac; powerprofilesctl set $n && "
       "swayosd-client --custom-message \"Profile: $n\"'" 
+    },
+    { blk_night,
+      "sh -c 'if pkill -x wlsunset; then "
+      "swayosd-client --custom-message \"Night mode off\" --custom-icon weather-clear-symbolic; "
+      "else "
+      "setsid wlsunset -t 4000 -T 4500 >/dev/null 2>&1 & "
+      "swayosd-client --custom-message \"Night mode on\" --custom-icon weather-clear-night-symbolic; "
+      "fi'" 
     },
 	{ blk_timedate,   "kitty sh -c 'cal -y; read _'" },
 };
