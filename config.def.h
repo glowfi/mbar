@@ -101,6 +101,11 @@ static const struct block blocks[] = {
 	{ blk_blue,       "blueman-manager" },
 	{ blk_volume,     "kitty -e 'pulsemixer'" },
 	{ blk_brightness, NULL },
-	{ blk_battery,    NULL },
+    { blk_battery,
+      "sh -c 'case $(powerprofilesctl get) in "
+      "power-saver) n=balanced;; balanced) n=performance;; "
+      "*) n=power-saver;; esac; powerprofilesctl set $n && "
+      "swayosd-client --custom-message \"Profile: $n\"'" 
+    },
 	{ blk_timedate,   "kitty sh -c 'cal -y; read _'" },
 };
